@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.vscode/
+.idea/
+output/*.json
+!output/sample_output.json
