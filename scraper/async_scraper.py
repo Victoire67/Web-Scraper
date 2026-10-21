@@ -8,8 +8,13 @@ from dataclasses import dataclass
 
 import aiohttp
 
+from scraper.decorators import rate_limit, retry
+
 DEFAULT_TIMEOUT = 10.0
 DEFAULT_CONCURRENCY = 10
+MAX_ATTEMPTS = 3
+RETRY_DELAY = 0.5
+RATE_LIMIT_PER_SECOND = 10
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +34,35 @@ class FetchResult:
         """True if the page was fetched without any error."""
         return self.error is None
 
-# The underscore before the download function means that this is an internal helper and that it can not be used outside of the module .
+
+def is_transient_error(error: Exception) -> bool:
+    """Return True for errors worth retrying.
+
+    Timeouts, network problems, server errors (5xx) and "too many requests"
+    (429) can succeed on a second try. Other 4xx errors, like 404, never will.
+    """
+    if isinstance(error, aiohttp.ClientResponseError):
+        return error.status >= 500 or error.status == 429
+    return isinstance(error, (aiohttp.ClientError, TimeoutError))
 
 
-async def _download(session: aiohttp.ClientSession, url: str) -> tuple[int, str]:
-    """Send a GET request and return the status code and body."""
-    async with session.get(url) as response:
-        response.raise_for_status()  # turns 4xx/5xx into an exception
-        return response.status, await response.text()
+@retry(attempts=MAX_ATTEMPTS, delay=RETRY_DELAY, retry_if=is_transient_error)
+@rate_limit(calls_per_second=RATE_LIMIT_PER_SECOND)
+async def _download(
+    session: aiohttp.ClientSession, url: str, timeout: float
+) -> tuple[int, str]:
+    """Send one GET request with a timeout and return the status code and body.
+
+    Raises on failure so @retry can try again. Each attempt passes through
+    @rate_limit, because retry is the outer decorator.
+    """
+
+    async def request() -> tuple[int, str]:
+        async with session.get(url) as response:
+            response.raise_for_status()  # turns 4xx/5xx into an exception
+            return response.status, await response.text()
+
+    return await asyncio.wait_for(request(), timeout=timeout)
 
 
 async def fetch_page(
@@ -53,7 +79,7 @@ async def fetch_page(
         return round(time.perf_counter() - start, 3)
 
     try:
-        status, html = await asyncio.wait_for(_download(session, url), timeout=timeout)
+        status, html = await _download(session, url, timeout)
         return FetchResult(url=url, status=status, html=html, elapsed=elapsed())
     except TimeoutError:
         return FetchResult(url=url, elapsed=elapsed(), error=f"Timed out after {timeout}s")
@@ -85,8 +111,7 @@ async def fetch_all(
             return result
 
     async with aiohttp.ClientSession() as session:
-        tasks = [asyncio.create_task(limited_fetch(session, url))
-                 for url in url_list]
+        tasks = [asyncio.create_task(limited_fetch(session, url)) for url in url_list]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # fetch_page shouldn't raise, but if something unexpected slips through,
