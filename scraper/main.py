@@ -1,0 +1,84 @@
+"""Command-line entry point for the async web scraper."""
+
+import argparse
+import asyncio
+import logging
+import time
+from pathlib import Path
+from typing import Any
+
+from scraper.async_scraper import (
+    DEFAULT_CONCURRENCY,
+    DEFAULT_TIMEOUT,
+    fetch_as_completed,
+)
+from scraper.extractor import extract_records
+from scraper.storage import DEFAULT_OUTPUT, build_report, save_json
+from scraper.url_loader import load_urls
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Async web scraper")
+    parser.add_argument(
+        "urls", nargs="*",
+        help="URLs to fetch. If none are given, they are read from --file.",
+    )
+    parser.add_argument(
+        "-f", "--file", type=Path, default=Path("urls.txt"),
+        help="Text file with one URL per line (default: urls.txt)",
+    )
+    parser.add_argument(
+        "--timeout", type=float, default=DEFAULT_TIMEOUT,
+        help=f"Seconds before giving up on a URL (default: {DEFAULT_TIMEOUT})",
+    )
+    parser.add_argument(
+        "--concurrency", type=int, default=DEFAULT_CONCURRENCY,
+        help=f"Maximum requests at the same time (default: {DEFAULT_CONCURRENCY})",
+    )
+    parser.add_argument(
+        "-o", "--output", type=Path, default=DEFAULT_OUTPUT,
+        help=f"JSON file to write the results to (default: {DEFAULT_OUTPUT})",
+    )
+    return parser.parse_args()
+
+
+def print_summary(records: list[dict[str, Any]], total_time: float) -> None:
+    failed = [r for r in records if r["error"]]
+    succeeded = len(records) - len(failed)
+
+    print()
+    for record in failed:
+        print(f"FAILED  {record['url']}  ->  {record['error']}")
+
+    slowest = max((r["elapsed"] for r in records), default=0)
+    print(f"\n{succeeded}/{len(records)} pages fetched in {total_time:.2f}s "
+          f"(slowest single page: {slowest:.2f}s)")
+
+
+async def main(urls: list[str], timeout: float, concurrency: int, output: Path) -> None:
+    start = time.perf_counter()
+    results = fetch_as_completed(urls, timeout=timeout, concurrency=concurrency)
+    records = [record async for record in extract_records(results)]
+    print_summary(records, time.perf_counter() - start)
+
+    # Results arrive in completion order; save them in input order instead.
+    position = {url: index for index, url in enumerate(urls)}
+    records.sort(key=lambda record: position[record["url"]])
+    path = await save_json(build_report(records), output)
+    print(f"Results saved to {path}")
+
+
+def run() -> None:
+    """Parse the command line and start the event loop."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d  %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    args = parse_args()
+    urls = args.urls or list(load_urls(args.file))
+    asyncio.run(main(urls, args.timeout, args.concurrency, args.output))
+
+
+if __name__ == "__main__":
+    run()

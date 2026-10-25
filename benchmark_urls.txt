@@ -1,0 +1,27 @@
+# Pages used by scraper/benchmark.py.
+# Only pages that load reliably, so the timings compare fetching
+# strategies rather than retries and timeouts.
+
+# Quotes (10 pages)
+https://quotes.toscrape.com/page/1/
+https://quotes.toscrape.com/page/2/
+https://quotes.toscrape.com/page/3/
+https://quotes.toscrape.com/page/4/
+https://quotes.toscrape.com/page/5/
+https://quotes.toscrape.com/page/6/
+https://quotes.toscrape.com/page/7/
+https://quotes.toscrape.com/page/8/
+https://quotes.toscrape.com/page/9/
+https://quotes.toscrape.com/page/10/
+
+# Books (10 pages)
+https://books.toscrape.com/catalogue/page-1.html
+https://books.toscrape.com/catalogue/page-2.html
+https://books.toscrape.com/catalogue/page-3.html
+https://books.toscrape.com/catalogue/page-4.html
+https://books.toscrape.com/catalogue/page-5.html
+https://books.toscrape.com/catalogue/page-6.html
+https://books.toscrape.com/catalogue/page-7.html
+https://books.toscrape.com/catalogue/page-8.html
+https://books.toscrape.com/catalogue/page-9.html
+https://books.toscrape.com/catalogue/page-10.html
