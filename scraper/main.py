@@ -55,7 +55,8 @@ async def main(urls: list[str], timeout: float, concurrency: int) -> None:
     print_summary(results, time.perf_counter() - start)
 
 
-if __name__ == "__main__":
+def run() -> None:
+    """Parse the command line and start the event loop."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s.%(msecs)03d  %(message)s",
@@ -64,3 +65,7 @@ if __name__ == "__main__":
     args = parse_args()
     urls = args.urls or list(load_urls(args.file))
     asyncio.run(main(urls, args.timeout, args.concurrency))
+
+
+if __name__ == "__main__":
+    run()

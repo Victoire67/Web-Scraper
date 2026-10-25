@@ -5,7 +5,7 @@ description = ""
 authors = [
     {name = "victoire67",email = "ansimavicky@gmail.com"}
 ]
-requires-python = ">3.11"
+requires-python = ">=3.11"
 dependencies = [
     "aiohttp (>=3.13,<3.14)",
     "aiofiles (>=25.1.0,<26.0.0)",
