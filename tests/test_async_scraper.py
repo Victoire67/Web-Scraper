@@ -8,7 +8,7 @@ import pytest
 from aioresponses import aioresponses
 
 from scraper import async_scraper
-from scraper.async_scraper import FetchResult, fetch_all, fetch_page
+from scraper.async_scraper import FetchResult, fetch_all, fetch_as_completed, fetch_page
 
 URL = "https://example.com"
 
@@ -158,3 +158,64 @@ async def test_fetch_all_records_unexpected_errors(monkeypatch):
 
     assert not results[0].ok
     assert "Unexpected error" in results[0].error
+
+
+# ---------------------------------------------------------------------------
+# fetch_as_completed: async generator yielding results as they finish
+# ---------------------------------------------------------------------------
+
+
+async def test_fetch_as_completed_yields_fastest_first(monkeypatch):
+    delays = {"https://example.com/slow": 0.3, "https://example.com/fast": 0.05}
+
+    async def fake_fetch_page(session, url, timeout):
+        await asyncio.sleep(delays[url])
+        return FetchResult(url=url, status=200)
+
+    monkeypatch.setattr(async_scraper, "fetch_page", fake_fetch_page)
+
+    urls = [result.url async for result in fetch_as_completed(delays)]
+
+    assert urls == ["https://example.com/fast", "https://example.com/slow"]
+
+
+async def test_fetch_as_completed_yields_every_result():
+    urls = ["https://example.com/a", "https://example.com/b"]
+    with aioresponses() as mocked:
+        mocked.get(urls[0], status=200, body="a")
+        mocked.get(urls[1], status=404)
+        results = [result async for result in fetch_as_completed(urls)]
+
+    assert sorted(r.url for r in results) == urls
+    assert sorted(r.ok for r in results) == [False, True]
+
+
+async def test_fetch_as_completed_records_unexpected_errors(monkeypatch):
+    async def broken_fetch_page(session, url, timeout):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(async_scraper, "fetch_page", broken_fetch_page)
+    results = [result async for result in fetch_as_completed(["https://example.com"])]
+
+    assert not results[0].ok
+    assert "Unexpected error" in results[0].error
+
+
+async def test_fetch_as_completed_cancels_pending_downloads_when_stopped(monkeypatch):
+    finished = []
+
+    async def fake_fetch_page(session, url, timeout):
+        await asyncio.sleep(0 if url.endswith("fast") else 1)
+        finished.append(url)
+        return FetchResult(url=url, status=200)
+
+    monkeypatch.setattr(async_scraper, "fetch_page", fake_fetch_page)
+    urls = ["https://example.com/fast", "https://example.com/slow"]
+
+    results = fetch_as_completed(urls)
+    async for _ in results:
+        break  # stop after the first result
+    await results.aclose()
+    await asyncio.sleep(0)
+
+    assert finished == ["https://example.com/fast"]
