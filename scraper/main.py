@@ -10,7 +10,7 @@ from scraper.async_scraper import (
     DEFAULT_CONCURRENCY,
     DEFAULT_TIMEOUT,
     FetchResult,
-    fetch_all,
+    fetch_as_completed,
 )
 from scraper.url_loader import load_urls
 
@@ -51,7 +51,10 @@ def print_summary(results: list[FetchResult], total_time: float) -> None:
 
 async def main(urls: list[str], timeout: float, concurrency: int) -> None:
     start = time.perf_counter()
-    results = await fetch_all(urls, timeout=timeout, concurrency=concurrency)
+    results = [
+        result
+        async for result in fetch_as_completed(urls, timeout=timeout, concurrency=concurrency)
+    ]
     print_summary(results, time.perf_counter() - start)
 
 
