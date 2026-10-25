@@ -13,6 +13,7 @@ from scraper.async_scraper import (
     fetch_as_completed,
 )
 from scraper.extractor import extract_records
+from scraper.storage import DEFAULT_OUTPUT, build_report, save_json
 from scraper.url_loader import load_urls
 
 
@@ -34,6 +35,10 @@ def parse_args() -> argparse.Namespace:
         "--concurrency", type=int, default=DEFAULT_CONCURRENCY,
         help=f"Maximum requests at the same time (default: {DEFAULT_CONCURRENCY})",
     )
+    parser.add_argument(
+        "-o", "--output", type=Path, default=DEFAULT_OUTPUT,
+        help=f"JSON file to write the results to (default: {DEFAULT_OUTPUT})",
+    )
     return parser.parse_args()
 
 
@@ -50,11 +55,17 @@ def print_summary(records: list[dict[str, Any]], total_time: float) -> None:
           f"(slowest single page: {slowest:.2f}s)")
 
 
-async def main(urls: list[str], timeout: float, concurrency: int) -> None:
+async def main(urls: list[str], timeout: float, concurrency: int, output: Path) -> None:
     start = time.perf_counter()
     results = fetch_as_completed(urls, timeout=timeout, concurrency=concurrency)
     records = [record async for record in extract_records(results)]
     print_summary(records, time.perf_counter() - start)
+
+    # Results arrive in completion order; save them in input order instead.
+    position = {url: index for index, url in enumerate(urls)}
+    records.sort(key=lambda record: position[record["url"]])
+    path = await save_json(build_report(records), output)
+    print(f"Results saved to {path}")
 
 
 def run() -> None:
@@ -66,7 +77,7 @@ def run() -> None:
     )
     args = parse_args()
     urls = args.urls or list(load_urls(args.file))
-    asyncio.run(main(urls, args.timeout, args.concurrency))
+    asyncio.run(main(urls, args.timeout, args.concurrency, args.output))
 
 
 if __name__ == "__main__":
