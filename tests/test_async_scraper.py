@@ -50,7 +50,7 @@ async def test_fetch_page_http_error(session):
 
 async def test_fetch_page_timeout(session):
     with aioresponses() as mocked:
-        mocked.get(URL, exception=TimeoutError())
+        mocked.get(URL, exception=TimeoutError(), repeat=True) 
         result = await fetch_page(session, URL, timeout=1)
 
     assert not result.ok
@@ -60,7 +60,7 @@ async def test_fetch_page_timeout(session):
 
 async def test_fetch_page_connection_error(session):
     with aioresponses() as mocked:
-        mocked.get(URL, exception=aiohttp.ClientConnectionError("refused"))
+        mocked.get(URL, exception=aiohttp.ClientConnectionError("refused"), repeat=True)
         result = await fetch_page(session, URL)
 
     assert not result.ok
@@ -76,6 +76,26 @@ async def test_fetch_page_records_elapsed_time(session):
     assert result.elapsed >= 0
 
 
+
+async def test_fetch_page_retries_server_error_then_succeeds(session):
+    with aioresponses() as mocked:
+        mocked.get(URL, status=500)                 # first attempt fails
+        mocked.get(URL, status=200, body="hello")   # retry succeeds
+        result = await fetch_page(session, URL)
+
+    assert result.ok
+    assert result.html == "hello"
+
+
+async def test_fetch_page_does_not_retry_404(session):
+    with aioresponses() as mocked:
+        mocked.get(URL, status=404)
+        mocked.get(URL, status=200, body="should never be reached")
+        result = await fetch_page(session, URL)
+
+    assert not result.ok
+    assert result.status == 404
+
 # ---------------------------------------------------------------------------
 # fetch_all: fetching many URLs concurrently
 # ---------------------------------------------------------------------------
@@ -85,7 +105,7 @@ async def test_fetch_all_keeps_order_and_mixes_results():
     urls = ["https://example.com/a", "https://example.com/b", "https://example.com/c"]
     with aioresponses() as mocked:
         mocked.get(urls[0], status=200, body="a")
-        mocked.get(urls[1], status=500)
+        mocked.get(urls[1], status=500, repeat=True)
         mocked.get(urls[2], status=200, body="c")
         results = await fetch_all(urls)
 
