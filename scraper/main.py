@@ -5,13 +5,14 @@ import asyncio
 import logging
 import time
 from pathlib import Path
+from typing import Any
 
 from scraper.async_scraper import (
     DEFAULT_CONCURRENCY,
     DEFAULT_TIMEOUT,
-    FetchResult,
     fetch_as_completed,
 )
+from scraper.extractor import extract_records
 from scraper.url_loader import load_urls
 
 
@@ -36,26 +37,24 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def print_summary(results: list[FetchResult], total_time: float) -> None:
-    failed = [r for r in results if not r.ok]
-    succeeded = len(results) - len(failed)
+def print_summary(records: list[dict[str, Any]], total_time: float) -> None:
+    failed = [r for r in records if r["error"]]
+    succeeded = len(records) - len(failed)
 
     print()
-    for result in failed:
-        print(f"FAILED  {result.url}  ->  {result.error}")
+    for record in failed:
+        print(f"FAILED  {record['url']}  ->  {record['error']}")
 
-    slowest = max((r.elapsed for r in results), default=0)
-    print(f"\n{succeeded}/{len(results)} pages fetched in {total_time:.2f}s "
+    slowest = max((r["elapsed"] for r in records), default=0)
+    print(f"\n{succeeded}/{len(records)} pages fetched in {total_time:.2f}s "
           f"(slowest single page: {slowest:.2f}s)")
 
 
 async def main(urls: list[str], timeout: float, concurrency: int) -> None:
     start = time.perf_counter()
-    results = [
-        result
-        async for result in fetch_as_completed(urls, timeout=timeout, concurrency=concurrency)
-    ]
-    print_summary(results, time.perf_counter() - start)
+    results = fetch_as_completed(urls, timeout=timeout, concurrency=concurrency)
+    records = [record async for record in extract_records(results)]
+    print_summary(records, time.perf_counter() - start)
 
 
 def run() -> None:
