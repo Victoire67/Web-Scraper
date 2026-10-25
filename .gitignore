@@ -3,10 +3,11 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
-.vscode/
+temp_auto_push.bat
 .idea/
 .claude/
 output/*.json
 !output/sample_output.json
 
-learning/
+learning/.gitignore
+branch_structure.json

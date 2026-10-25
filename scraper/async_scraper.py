@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import time
-from collections.abc import Iterable
+from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
 
 import aiohttp
@@ -89,6 +89,26 @@ async def fetch_page(
         return FetchResult(url=url, elapsed=elapsed(), error=f"{type(e).__name__}: {e}")
 
 
+async def _limited_fetch(
+    session: aiohttp.ClientSession,
+    semaphore: asyncio.Semaphore,
+    url: str,
+    timeout: float,
+) -> FetchResult:
+    """Fetch one URL once the semaphore lets us in, logging start and end."""
+    async with semaphore:
+        logger.info("START %s", url)
+        try:
+            result = await fetch_page(session, url, timeout)
+        except Exception as e:
+            # fetch_page shouldn't raise, but if something unexpected slips
+            # through, record it as a failed result instead of crashing the run.
+            result = FetchResult(url=url, error=f"Unexpected error: {e!r}")
+        status = "DONE " if result.ok else "FAIL "
+        logger.info("%s %s (%.2fs)", status, url, result.elapsed)
+        return result
+
+
 async def fetch_all(
     urls: Iterable[str],
     timeout: float = DEFAULT_TIMEOUT,
@@ -99,25 +119,36 @@ async def fetch_all(
     A semaphore caps how many requests run at once, so we don't flood
     the servers or get blocked.
     """
-    url_list = list(urls)
     semaphore = asyncio.Semaphore(concurrency)
-
-    async def limited_fetch(session: aiohttp.ClientSession, url: str) -> FetchResult:
-        async with semaphore:
-            logger.info("START %s", url)
-            result = await fetch_page(session, url, timeout)
-            status = "DONE " if result.ok else "FAIL "
-            logger.info("%s %s (%.2fs)", status, url, result.elapsed)
-            return result
-
     async with aiohttp.ClientSession() as session:
-        tasks = [asyncio.create_task(limited_fetch(session, url)) for url in url_list]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        tasks = [
+            asyncio.create_task(_limited_fetch(session, semaphore, url, timeout))
+            for url in urls
+        ]
+        return await asyncio.gather(*tasks)
 
-    # fetch_page shouldn't raise, but if something unexpected slips through,
-    # record it as a failed result instead of crashing the whole run.
-    return [
-        result if isinstance(result, FetchResult)
-        else FetchResult(url=url, error=f"Unexpected error: {result!r}")
-        for url, result in zip(url_list, results)
-    ]
+
+async def fetch_as_completed(
+    urls: Iterable[str],
+    timeout: float = DEFAULT_TIMEOUT,
+    concurrency: int = DEFAULT_CONCURRENCY,
+) -> AsyncIterator[FetchResult]:
+    """Fetch many URLs concurrently and yield each result as soon as it is ready.
+
+    Unlike fetch_all, the caller doesn't wait for the slowest page: it can
+    start processing fast pages with `async for` while slow ones are still
+    downloading. Results arrive in completion order, not input order.
+    """
+    semaphore = asyncio.Semaphore(concurrency)
+    async with aiohttp.ClientSession() as session:
+        tasks = [
+            asyncio.create_task(_limited_fetch(session, semaphore, url, timeout))
+            for url in urls
+        ]
+        try:
+            for next_done in asyncio.as_completed(tasks):
+                yield await next_done
+        finally:
+            # If the caller stops early, don't leave downloads running.
+            for task in tasks:
+                task.cancel()
