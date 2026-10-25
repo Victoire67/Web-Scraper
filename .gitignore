@@ -5,6 +5,7 @@ __pycache__/
 .env
 .vscode/
 .idea/
+.claude/
 output/*.json
 !output/sample_output.json
 
